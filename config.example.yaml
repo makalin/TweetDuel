@@ -1,0 +1,44 @@
+# TweetDuel Configuration Example
+# Copy this file to ~/.tweetduel/config.yaml and customize as needed
+
+# AI Model Configuration
+ai:
+  model: "llama3.2"          # Ollama model to use
+  temperature: 0.8            # Creativity level (0.0 = focused, 1.0 = creative)
+  max_tokens: 500             # Maximum response length
+
+# Twitter Scraping Configuration
+scraping:
+  max_replies: 50             # Maximum number of replies to analyze
+  include_quotes: true        # Include quoted tweets in analysis
+  language_filter: "en"       # Language filter for replies
+
+# Debate Configuration
+debate:
+  default_persona: "socrates" # Default debate persona
+  response_styles:             # Types of responses to generate
+    - "contrarian"            # Oppose the original argument
+    - "devils_advocate"       # Present alternative viewpoints
+    - "nuanced"               # Balanced, thoughtful response
+  viral_hooks: true           # Add engagement hooks to responses
+
+# Ollama Configuration
+ollama_host: "http://localhost:11434"  # Ollama server address
+
+# Output Configuration
+output:
+  save_duels: true            # Save duel results to files
+  save_armory: true           # Save responses to armory
+  output_format: "json"       # Output format (json, markdown, text)
+  include_metadata: true      # Include metadata in output
+
+# Rate Limiting
+rate_limiting:
+  requests_per_minute: 60     # Maximum requests per minute
+  delay_between_requests: 1.0 # Delay between requests in seconds
+
+# Logging
+logging:
+  level: "INFO"               # Log level (DEBUG, INFO, WARNING, ERROR)
+  log_to_file: true           # Save logs to file
+  log_file: "tweetduel.log"   # Log file name
