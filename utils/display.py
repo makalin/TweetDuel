@@ -164,18 +164,36 @@ class TweetDuelDisplay:
         self.console.print(armory_table)
     
     def show_config_summary(self, config: Dict[str, Any]):
-        """Show configuration summary"""
+        """Show configuration summary. Redacts API keys and secrets."""
+        # Keys (and section names) whose values must never be printed
+        _SENSITIVE_KEYS = frozenset({
+            "api_key", "api_secret", "bearer_token", "access_token",
+            "access_token_secret", "password", "secret", "token", "credentials",
+        })
+        _SENSITIVE_SECTIONS = frozenset({"twitter_bot"})
+
+        def _redact(section: str, key: str, value: Any) -> str:
+            if value is None or value == "":
+                return str(value)
+            key_lower = key.lower()
+            if key_lower in _SENSITIVE_KEYS or section.lower() in _SENSITIVE_SECTIONS:
+                return "***" if value else ""
+            return str(value)
+
         config_table = Table(title="⚙️ Configuration")
         config_table.add_column("Setting", style="cyan", no_wrap=True)
         config_table.add_column("Value", style="magenta")
-        
+
         for section, settings in config.items():
             if isinstance(settings, dict):
                 for key, value in settings.items():
-                    config_table.add_row(f"{section}.{key}", str(value))
+                    config_table.add_row(
+                        f"{section}.{key}",
+                        _redact(section, key, value),
+                    )
             else:
-                config_table.add_row(section, str(settings))
-        
+                config_table.add_row(section, _redact("", section, settings))
+
         self.console.print(config_table)
     
     def show_error(self, error: str, details: str = None):

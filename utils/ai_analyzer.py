@@ -181,6 +181,64 @@ class AIAnalyzer:
                 
         except Exception as e:
             return {'error': str(e), 'timestamp': datetime.now().isoformat()}
+
+    def predict_thread_direction(
+        self,
+        tweet: Dict[str, Any],
+        replies: List[Dict[str, Any]],
+        horizon: str = "short",
+        language_hint: str = "en",
+    ) -> Dict[str, Any]:
+        """
+        Predict where the thread discussion is likely to go.
+        horizon: 'short' (next few replies), 'medium' (next day), 'long' (viral/trending)
+        """
+        replies_preview = json.dumps(
+            [{"author": r.get("author"), "content": (r.get("content") or "")[:200]} for r in replies[:15]],
+            indent=2,
+        )
+        prompt = f"""You are analyzing a Twitter thread. Based on the original tweet and existing replies, predict where this discussion is likely to go.
+
+Original tweet by @{tweet.get('author', 'unknown')}: {tweet.get('content', '')[:500]}
+
+Existing replies (sample): {replies_preview}
+
+Prediction horizon: {horizon}.
+
+Provide a structured prediction in JSON format with these keys (use the requested language hint "{language_hint}" for any narrative text):
+- likely_directions: list of 3-5 likely directions the thread will take (e.g. "polarization", "fact-checking", "memes", "new angle")
+- probable_next_themes: list of themes or claims that will likely appear next
+- viral_potential: 1-10 score and brief reason
+- recommended_counter_angles: list of angles that would be most effective for a counter-response
+- summary: one short paragraph summarizing the prediction
+
+If you cannot output valid JSON, still provide a clear text summary under a key "analysis".
+"""
+        try:
+            response = self.client.generate(
+                model=self.model,
+                prompt=prompt,
+                options={
+                    "temperature": min(self.temperature + 0.1, 1.0),
+                    "num_predict": min(self.max_tokens + 200, 800),
+                },
+            )
+            raw = response["response"]
+            try:
+                # Try to extract JSON block if wrapped in markdown
+                if "```json" in raw:
+                    raw = raw.split("```json")[1].split("```")[0].strip()
+                elif "```" in raw:
+                    raw = raw.split("```")[1].split("```")[0].strip()
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                return {
+                    "analysis": raw,
+                    "timestamp": datetime.now().isoformat(),
+                    "parse_error": True,
+                }
+        except Exception as e:
+            return {"error": str(e), "timestamp": datetime.now().isoformat()}
     
     def optimize_for_viral(self, content: str, target_audience: str = 'general') -> Dict[str, Any]:
         """Optimize content for viral engagement"""

@@ -22,6 +22,20 @@ debate:
     - "nuanced"               # Balanced, thoughtful response
   viral_hooks: true           # Add engagement hooks to responses
 
+# Language (en, tr, es, de, fr)
+language: "en"
+
+# Twitter Bot - use environment variables only (never put keys in this file or any file committed to git)
+# Set: TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET
+# Or: TWITTER_BEARER_TOKEN (read-only)
+twitter_bot:
+  enabled: false
+
+# Reports
+reports:
+  default_format: "html"   # html, text, json
+  output_dir: "reports"
+
 # Ollama Configuration
 ollama_host: "http://localhost:11434"  # Ollama server address
 

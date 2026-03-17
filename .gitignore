@@ -119,8 +119,10 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Environments
+# Environments and secrets (never commit)
 .env
+.env.*
+!.env.example
 .venv
 env/
 venv/
@@ -169,15 +171,21 @@ cython_debug/
 .vscode/
 *.code-workspace
 
-# TweetDuel specific
+# TweetDuel specific (config may contain API keys - never commit)
 config.yaml
+config.local.yaml
+*.local.yaml
 *.log
 duels/
 armory/
 cache/
+reports/
 models/
 .env.local
+.env.*.local
 secrets.yaml
+*secrets*
+credentials*
 
 # OS specific
 .DS_Store

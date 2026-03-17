@@ -28,6 +28,11 @@ TweetDuel is a lightning-fast terminal tool that scrapes Twitter/X replies, anal
 | **🎭 Persona Modes** | 5 debate styles: *Socrates*, *Machiavelli*, *Chomsky*, *Tate*, *Neutral* |
 | **💾 Content Arsenal** | Saves generated responses as drafts for later deployment |
 | **🎪 Engagement Hacks** | Adds hooks, questions, and viral elements to responses |
+| **📄 Reports** | Generate HTML, text, or JSON reports of duels |
+| **🔮 Thread Prediction** | AI predicts where the discussion will go |
+| **🤖 Twitter Bot** | Post counter-replies to Twitter (with approval) via API |
+| **🌍 Multi-Language** | UI and output in English, Turkish, Spanish, German, French |
+| **📊 Tools** | Batch URLs, stats, export to Markdown/JSON |
 
 ---
 
@@ -51,11 +56,57 @@ ollama pull llama3.2
 
 ---
 
+## 📦 Build & run from any folder
+
+Install TweetDuel once so you can run it from **any directory** on your PC:
+
+```bash
+# From the TweetDuel project folder
+cd TweetDuel
+
+# Option A: Editable install (recommended for development)
+# Changes to code take effect immediately; run from anywhere
+pip install -e .
+
+# Option B: Normal install (for using as a fixed app)
+pip install .
+```
+
+Then run from **any folder**:
+
+```bash
+# Run from anywhere (no need to cd to TweetDuel)
+tweetduel
+tweetduel --url "https://x.com/user/status/123" --lang tr
+tweetduel --stats
+```
+
+**Windows (PowerShell or CMD):** Same as above after `pip install -e .` — the `tweetduel` command is on your PATH.
+
+**Using Python module (no install):** From any folder, if the project is on `PYTHONPATH` or you run from project root:
+
+```bash
+cd C:\inetpub\wwwroot\TweetDuel
+python -m tweetduel
+```
+
+**Run scripts (no install):** From the project folder you can use:
+- **Windows CMD:** `run.bat` or `run.bat --url "https://..."`
+- **PowerShell:** `.\run.ps1` or `.\run.ps1 --stats`
+- Set `TWEETDUEL_HOME` to the TweetDuel folder to use `run.bat` from elsewhere; data dirs (duels, armory, etc.) will be created in the project folder.
+
+**Note:** When you run the installed `tweetduel` command, duels, armory, cache, and reports are created in the **current working directory**. Config is stored in `~/.tweetduel/config.yaml` (or `%USERPROFILE%\.tweetduel\config.yaml` on Windows).
+
+---
+
 ## ⚡ Quick Start
 
 ```bash
-# Launch TweetDuel
+# From project folder (without install)
 python tweetduel.py
+
+# Or after "pip install -e ." — from any folder
+tweetduel
 
 # Paste a tweet URL when prompted
 🔗 Enter tweet URL: https://x.com/elonmusk/status/1234567890
@@ -125,21 +176,56 @@ python tweetduel.py --model mistral --persona tate
 
 ### Batch Processing
 ```bash
-# Duel multiple tweets
-python tweetduel.py --batch urls.txt --output duel_results.json
+# Duel multiple tweets (one URL per line in urls.txt)
+python tweetduel.py --batch urls.txt
 ```
 
-### Real-time Monitoring
+### Reports
 ```bash
-# Watch a tweet for new replies
-python tweetduel.py --watch --interval 300
+# Generate HTML report after duel
+python tweetduel.py -u "TWEET_URL" --report html --report-out reports/my_duel.html
+
+# Text or JSON report
+python tweetduel.py -u "TWEET_URL" --report text
+```
+
+### Thread Prediction
+```bash
+# Only run thread prediction (no counters)
+python tweetduel.py -u "TWEET_URL" --predict-only
+```
+
+### Twitter Bot (post with approval)
+**Use environment variables only—never put API keys in config files committed to git.** (See *Security* below.)
+```bash
+# Set env: TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET
+# Then run with --post to be prompted to post each counter-reply
+python tweetduel.py -u "TWEET_URL" --post
+```
+
+### Multi-Language (including Turkish)
+```bash
+# Turkish UI and output
+python tweetduel.py -u "TWEET_URL" --lang tr
+
+# Or set in config: language: "tr"
+```
+
+### Stats & Export
+```bash
+# Show duel and armory stats
+python tweetduel.py --stats
+
+# Export last duel to Markdown or JSON
+python tweetduel.py --export md
+python tweetduel.py --export json
 ```
 
 ---
 
 ## 🎨 Configuration
 
-Create `~/.tweetduel/config.yaml`:
+Create `~/.tweetduel/config.yaml` (or copy from `config.example.yaml`). **Do not put API keys or secrets in any file you commit to git—use environment variables.** (See *Security* below.)
 
 ```yaml
 ai:
@@ -156,18 +242,30 @@ debate:
   default_persona: "socrates"
   response_styles: ["contrarian", "devils_advocate", "nuanced"]
   viral_hooks: true
+
+# UI language: en, tr, es, de, fr
+language: "en"
+
+# Optional Twitter API (or use env vars)
+twitter_bot:
+  enabled: false
+
+reports:
+  default_format: "html"
+  output_dir: "reports"
 ```
 
 ---
 
 ## 🚧 Roadmap
 
+- [x] **Multi-Language**: English, Turkish, Spanish, German, French
+- [x] **Thread Prediction**: AI predicts where discussions will go
+- [x] **Twitter Bot Integration**: Post responses with approval (env: `TWITTER_*`)
+- [x] **Reports**: HTML, text, JSON reports
 - [ ] **Image Reply Support**: Analyze and respond to image-based arguments
-- [ ] **Multi-Language Battles**: Duel in Spanish, French, German
-- [ ] **Thread Prediction**: AI predicts where discussions will go
 - [ ] **Collaborative Duels**: Multiple AI personas team up
 - [ ] **Analytics Dashboard**: Track which counters went viral
-- [ ] **Twitter Bot Integration**: Auto-deploy responses (with approval)
 
 ---
 
@@ -181,17 +279,42 @@ debate:
 
 ---
 
+## 🔒 Security
+
+**Do not commit API keys or secrets.** Use **environment variables** for Twitter: `TWITTER_API_KEY`, `TWITTER_API_SECRET`, `TWITTER_ACCESS_TOKEN`, `TWITTER_ACCESS_TOKEN_SECRET` (or `TWITTER_BEARER_TOKEN`). Don’t put them in `config.yaml` or any committed file. User config in `~/.tweetduel/config.yaml` is outside the repo. Git ignores: `config.yaml`, `.env`, `.env.*`, `secrets.yaml`, `*secrets*`, `credentials*`, and data dirs (`duels/`, `armory/`, `reports/`). If you leak a key, rotate it immediately in the Twitter Developer Portal; it remains in git history otherwise. The app redacts secrets when showing config.
+
+---
+
+## 📁 Project structure
+
+```
+TweetDuel/
+├── tweetduel.py          # Main entry, CLI (Click)
+├── config.example.yaml   # Example config (copy to ~/.tweetduel/config.yaml)
+├── setup.py, requirements.txt
+├── utils/
+│   ├── config.py         # Config load/save
+│   ├── scraper.py        # Twitter scraping (snscrape)
+│   ├── ai_analyzer.py    # Ollama analysis, counters, thread prediction
+│   ├── display.py        # Rich terminal UI
+│   ├── i18n.py           # Multi-language (en, tr, es, de, fr)
+│   ├── reports.py        # HTML/text/JSON reports
+│   ├── tools.py          # Export, batch, stats
+│   └── twitter_bot.py    # Twitter API posting (env vars only)
+├── tests/
+├── examples/
+├── duels/                 # Generated duel data (auto-created, gitignored)
+├── armory/                # Saved responses (auto-created, gitignored)
+└── reports/               # Report output (auto-created, gitignored)
+```
+
+**Dev commands:** `make install-dev`, `make test`, `make format`, `make lint`, `make install-local`, `make build`.
+
+---
+
 ## 🤝 Contributing
 
-We welcome debate champions! See [CONTRIBUTING.md](CONTRIBUTING.md)
-
-### Quick Start for Devs:
-```bash
-git clone https://github.com/makalin/TweetDuel.git
-cd TweetDuel
-pip install -r requirements-dev.txt
-python -m pytest tests/
-```
+PRs welcome. Dev setup: `pip install -r requirements-dev.txt`, then `python -m pytest tests/`. Use Black for formatting.
 
 ---
 

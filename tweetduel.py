@@ -33,6 +33,11 @@ import requests
 from bs4 import BeautifulSoup
 import ollama
 
+from utils.i18n import t, set_default_language, get_supported_languages
+from utils.reports import generate_report
+from utils.tools import export_duel_markdown, export_duel_json, get_duel_stats, list_armory_files, load_duel
+from utils.twitter_bot import get_twitter_client, post_reply, is_bot_available
+
 # Initialize Rich console
 console = Console()
 
@@ -51,8 +56,12 @@ class TweetDuel:
         self.armory_dir = Path("armory")
         self.cache_dir = Path("cache")
         
-        for directory in [self.duels_dir, self.armory_dir, self.cache_dir]:
+        self.reports_dir = Path(self.config.get("reports", {}).get("output_dir", "reports"))
+        for directory in [self.duels_dir, self.armory_dir, self.cache_dir, self.reports_dir]:
             directory.mkdir(exist_ok=True)
+
+        lang = self.config.get("language", "en")
+        set_default_language(lang)
     
     def load_config(self, config_path: str = None) -> Dict:
         """Load configuration from file or create default"""
@@ -98,12 +107,12 @@ class TweetDuel:
             else:
                 raise ValueError("Invalid Twitter URL format")
         except Exception as e:
-            console.print(f"[red]Error extracting tweet ID: {e}[/red]")
+            console.print(f"[red]{t('error_extracting_id', e=e)}[/red]")
             return None
     
     def scrape_tweet(self, tweet_id: str) -> Dict:
         """Scrape tweet and replies using snscrape"""
-        console.print("[yellow]🥊 Scraping tweet and replies...[/yellow]")
+        console.print(f"[yellow]🥊 {t('scraping')}[/yellow]")
         
         try:
             # Scrape the main tweet
@@ -158,7 +167,7 @@ class TweetDuel:
             }
             
         except Exception as e:
-            console.print(f"[red]Error scraping tweet: {e}[/red]")
+            console.print(f"[red]{t('error_scraping', e=e)}[/red]")
             return None
     
     def analyze_arguments(self, content: str) -> Dict:
@@ -197,7 +206,7 @@ class TweetDuel:
                 }
                 
         except Exception as e:
-            console.print(f"[red]Error analyzing arguments: {e}[/red]")
+            console.print(f"[red]{t('error_analyzing', e=e)}[/red]")
             return {'error': str(e)}
     
     def generate_counter_response(self, original_content: str, analysis: Dict, persona: str = 'socrates') -> Dict:
@@ -250,7 +259,7 @@ class TweetDuel:
             }
             
         except Exception as e:
-            console.print(f"[red]Error generating response: {e}[/red]")
+            console.print(f"[red]{t('error_generating', e=e)}[/red]")
             return {'error': str(e)}
     
     def create_duel_summary(self, tweet_data: Dict, replies: List, counters: List) -> str:
@@ -278,7 +287,7 @@ class TweetDuel:
         """
         return summary
     
-    def save_duel(self, tweet_data: Dict, replies: List, counters: List, duel_id: str):
+    def save_duel(self, tweet_data: Dict, replies: List, counters: List, duel_id: str, thread_prediction: Optional[Dict] = None):
         """Save duel data to file"""
         duel_data = {
             'duel_id': duel_id,
@@ -286,14 +295,15 @@ class TweetDuel:
             'tweet': tweet_data,
             'replies': replies,
             'counters': counters,
-            'summary': self.create_duel_summary(tweet_data, replies, counters)
+            'summary': self.create_duel_summary(tweet_data, replies, counters),
+            'thread_prediction': thread_prediction,
         }
         
         duel_file = self.duels_dir / f"{duel_id}.json"
         with open(duel_file, 'w') as f:
             json.dump(duel_data, f, indent=2)
         
-        console.print(f"[green]💾 Duel saved to: {duel_file}[/green]")
+        console.print(f"[green]💾 {t('duel_saved', path=duel_file)}[/green]")
     
     def display_results(self, tweet_data: Dict, replies: List, counters: List):
         """Display duel results in a beautiful format"""
@@ -330,9 +340,46 @@ class TweetDuel:
         
         console.print("\n" + "="*80)
     
+    def _generate_and_save_report(
+        self, tweet_data: Dict, replies: List, counters: List,
+        thread_prediction: Optional[Dict], report_format: str, report_out: Optional[str], duel_id: str,
+    ):
+        out_dir = self.reports_dir
+        if not report_out:
+            report_out = str(out_dir / f"report_{duel_id}.{report_format if report_format != 'html' else 'html'}")
+        generate_report(
+            tweet_data, replies, counters,
+            thread_prediction=thread_prediction,
+            format=report_format,
+            output_path=report_out,
+        )
+        console.print(f"[green]📄 {t('report_generated', path=report_out)}[/green]")
+
+    def _offer_post_replies(self, tweet_id: str, counters: List):
+        """Ask user to post one or more counter replies to Twitter."""
+        client, err = get_twitter_client(self.config)
+        if not client:
+            console.print(f"[yellow]Twitter bot: {err}[/yellow]")
+            return
+        for i, c in enumerate(counters):
+            if "error" in c or "response" not in c:
+                continue
+            text = (c.get("response") or "")[:280]
+            if not text:
+                continue
+            console.print(Panel(text[:200] + ("..." if len(text) > 200 else ""), title=f"Counter {i+1} ({c.get('persona', '')})"))
+            if Confirm.ask(t("post_approval")):
+                ok, err_msg, _ = post_reply(client, str(tweet_id), text, self.config)
+                if ok:
+                    console.print(f"[green]{t('post_success')}[/green]")
+                else:
+                    console.print(f"[red]{err_msg}[/red]")
+            else:
+                console.print(f"[dim]{t('post_cancelled')}[/dim]")
+
     def run_instant_duel(self, tweet_url: str, persona: str = None):
         """Run instant duel mode"""
-        console.print("[bold blue]🥊 INSTANT DUEL MODE[/bold blue]")
+        console.print(f"[bold blue]🥊 {t('instant_mode')}[/bold blue]")
         
         # Extract tweet ID
         tweet_id = self.extract_tweet_id(tweet_url)
@@ -348,15 +395,15 @@ class TweetDuel:
         replies = data['replies']
         
         if not replies:
-            console.print("[yellow]No replies found for this tweet.[/yellow]")
+            console.print(f"[yellow]{t('no_replies')}[/yellow]")
             return
         
         # Analyze and generate counters
-        console.print(f"[yellow]🧠 Analyzing {len(replies)} replies...[/yellow]")
+        console.print(f"[yellow]🧠 {t('analyzing', count=len(replies))}[/yellow]")
         counters = []
         
         for i, reply in enumerate(replies):
-            console.print(f"[cyan]Analyzing reply {i+1}/{len(replies)}...[/cyan]")
+            console.print(f"[cyan]{t('analyzing_reply', current=i+1, total=len(replies))}[/cyan]")
             
             # Analyze arguments
             analysis = self.analyze_arguments(reply['content'])
@@ -369,13 +416,29 @@ class TweetDuel:
         # Display results
         self.display_results(tweet_data, replies, counters)
         
+        # Thread prediction (before save so we store it)
+        thread_prediction = self.run_thread_prediction(tweet_data, replies)
+        if thread_prediction and "error" not in thread_prediction:
+            self._display_thread_prediction(thread_prediction)
+        
         # Save duel
         duel_id = f"duel_{tweet_id}_{int(time.time())}"
-        self.save_duel(tweet_data, replies, counters, duel_id)
-        
+        self.save_duel(tweet_data, replies, counters, duel_id, thread_prediction=thread_prediction)
+
+        # Report generation
+        if getattr(self, "_report_format", None):
+            self._generate_and_save_report(
+                tweet_data, replies, counters, thread_prediction,
+                self._report_format, self._report_out, duel_id,
+            )
+
         # Ask if user wants to save to armory
-        if Confirm.ask("💾 Save responses to armory for later deployment?"):
+        if Confirm.ask(f"💾 {t('save_to_armory_prompt')}"):
             self.save_to_armory(counters, duel_id)
+
+        # Optional: post to Twitter with approval
+        if getattr(self, "_offer_post", False) and is_bot_available(self.config):
+            self._offer_post_replies(tweet_data.get("id"), counters)
     
     def save_to_armory(self, counters: List, duel_id: str):
         """Save generated responses to armory"""
@@ -391,38 +454,73 @@ class TweetDuel:
         with open(armory_file, 'w') as f:
             json.dump(armory_data, f, indent=2)
         
-        console.print(f"[green]💾 Responses saved to armory: {armory_file}[/green]")
+        console.print(f"[green]💾 {t('armory_saved', path=armory_file)}[/green]")
     
+    def run_thread_prediction(self, tweet_data: Dict, replies: List, horizon: str = "short") -> Optional[Dict]:
+        """Run AI thread prediction. Returns prediction dict or None."""
+        from utils.ai_analyzer import AIAnalyzer
+        lang = self.config.get("language", "en")
+        analyzer = AIAnalyzer(
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        return analyzer.predict_thread_direction(tweet_data, replies, horizon=horizon, language_hint=lang)
+
+    def _display_thread_prediction(self, prediction: Dict):
+        """Display thread prediction in terminal."""
+        console.print()
+        console.print(Panel.fit(
+            f"[bold cyan]{t('thread_prediction')}[/bold cyan]",
+            style="cyan",
+        ))
+        summary = prediction.get("summary") or prediction.get("analysis") or json.dumps(prediction, indent=2)[:800]
+        console.print(Panel(summary, title=t("prediction_title"), style="dim"))
+        if prediction.get("likely_directions"):
+            console.print("[dim]Likely directions: " + ", ".join(prediction.get("likely_directions", [])) + "[/dim]")
+
     def run_sniper_mode(self, tweet_url: str):
         """Run sniper mode - wait for new replies"""
-        console.print("[bold blue]🎯 SNIPER MODE[/bold blue]")
-        console.print("Watching for new replies... (Press Ctrl+C to stop)")
+        console.print(f"[bold blue]🎯 {t('sniper_mode')}[/bold blue]")
+        console.print(t("sniper_watching"))
         
         # This would implement real-time monitoring
         # For now, just show the concept
-        console.print("[yellow]Sniper mode would monitor for new replies and auto-generate counters.[/yellow]")
+        console.print(f"[yellow]{t('sniper_concept')}[/yellow]")
     
     def run_armory_mode(self, tweet_url: str):
         """Run armory mode - save all responses"""
-        console.print("[bold blue]💾 ARMORY MODE[/bold blue]")
-        console.print("Generating and saving responses for strategic deployment...")
+        console.print(f"[bold blue]💾 {t('armory_mode')}[/bold blue]")
+        console.print(t("armory_generating"))
         
         # Run instant duel first
         self.run_instant_duel(tweet_url)
         
-        console.print("[green]All responses saved to armory for strategic deployment![/green]")
+        console.print(f"[green]{t('armory_done')}[/green]")
 
 @click.command()
 @click.option('--url', '-u', help='Tweet URL to duel')
-@click.option('--mode', '-m', 
-              type=click.Choice(['instant', 'sniper', 'armory']), 
+@click.option('--mode', '-m',
+              type=click.Choice(['instant', 'sniper', 'armory']),
               default='instant',
               help='Duel mode')
 @click.option('--persona', '-p',
               type=click.Choice(['socrates', 'machiavelli', 'chomsky', 'tate', 'neutral']),
               help='Debate persona to use')
 @click.option('--config', '-c', help='Path to config file')
-def main(url, mode, persona, config):
+@click.option('--lang', '-l', 'language',
+              type=click.Choice(get_supported_languages()),
+              help='UI/output language (en, tr, es, de, fr)')
+@click.option('--report', '-r', 'report_format',
+              type=click.Choice(['html', 'text', 'json']),
+              help='Generate report after duel (html, text, json)')
+@click.option('--report-out', help='Report output path (default: reports/report_<duel_id>.<ext>)')
+@click.option('--post', 'offer_post', is_flag=True, help='Offer to post counter-replies to Twitter (with approval)')
+@click.option('--batch', '-b', 'batch_file', help='Batch process: file with one tweet URL per line')
+@click.option('--stats', is_flag=True, help='Show duel and armory stats')
+@click.option('--export', 'export_format', type=click.Choice(['md', 'json']), help='Export last duel to markdown or JSON')
+@click.option('--predict-only', is_flag=True, help='Only run thread prediction for the given URL (no counters)')
+def main(url, mode, persona, config, language, report_format, report_out, offer_post, batch_file, stats, export_format, predict_only):
     """TweetDuel - AI-powered Twitter debate tool"""
     
     # Show banner
@@ -435,24 +533,95 @@ def main(url, mode, persona, config):
     try:
         # Initialize TweetDuel
         tweetduel = TweetDuel(config)
+        if language:
+            set_default_language(language)
+        
+        # Stats only
+        if stats:
+            from utils.tools import get_duel_stats
+            s = get_duel_stats(tweetduel.duels_dir, tweetduel.armory_dir)
+            console.print(f"[cyan]{t('stats_duels', count=s['total_duels'])}[/cyan]")
+            console.print(f"[cyan]{t('stats_armory', count=s['total_armory_items'])}[/cyan]")
+            if s.get("last_duel_at"):
+                console.print(f"[dim]Last duel: {s['last_duel_at']}[/dim]")
+            return
+        
+        # Export last duel
+        if export_format:
+            from utils.tools import list_duel_files, load_duel, export_duel_markdown, export_duel_json
+            files = list_duel_files(tweetduel.duels_dir)
+            if not files:
+                console.print("[yellow]No duels found. Run a duel first.[/yellow]")
+                return
+            duel_data = load_duel(files[0])
+            if not duel_data:
+                console.print("[red]Could not load duel.[/red]")
+                return
+            tdata, replies, counters = duel_data["tweet"], duel_data["replies"], duel_data["counters"]
+            pred = duel_data.get("thread_prediction")
+            out = str(tweetduel.reports_dir / f"export_{files[0].replace('.json','').split(os.sep)[-1]}.{'md' if export_format == 'md' else 'json'}")
+            if export_format == "md":
+                export_duel_markdown(tdata, replies, counters, out, pred)
+            else:
+                export_duel_json(tdata, replies, counters, out, pred)
+            console.print(f"[green]Exported to {out}[/green]")
+            return
+        
+        # Predict-only mode
+        if predict_only:
+            if not url:
+                url = Prompt.ask(f"🔗 {t('enter_tweet_url')}")
+            if not url:
+                console.print(f"[red]{t('no_url')}[/red]")
+                return
+            tid = tweetduel.extract_tweet_id(url)
+            if not tid:
+                return
+            data = tweetduel.scrape_tweet(tid)
+            if not data:
+                return
+            pred = tweetduel.run_thread_prediction(data["tweet"], data["replies"])
+            if pred and "error" not in pred:
+                tweetduel._display_thread_prediction(pred)
+            else:
+                console.print("[red]Prediction failed.[/red]")
+            return
+        
+        # Batch mode
+        if batch_file:
+            if not os.path.exists(batch_file):
+                console.print(f"[red]File not found: {batch_file}[/red]")
+                return
+            with open(batch_file, "r") as f:
+                urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+            console.print(f"[yellow]{t('batch_processing', count=len(urls))}[/yellow]")
+            for u in urls:
+                tweetduel.run_instant_duel(u, persona)
+            return
         
         # Check if Ollama is running
         try:
             models = tweetduel.ollama_client.list()
-            console.print(f"[green]✅ Ollama connected. Available models: {[m['name'] for m in models['models']]}[/green]")
+            model_names = [m['name'] for m in models.get('models', [])]
+            console.print(f"[green]✅ {t('ollama_connected', models=model_names)}[/green]")
         except Exception as e:
-            console.print(f"[red]❌ Ollama not running. Please start Ollama first:[/red]")
+            console.print(f"[red]❌ {t('ollama_not_running')}[/red]")
             console.print("[yellow]curl https://ollama.ai/install.sh | sh[/yellow]")
             console.print("[yellow]ollama serve[/yellow]")
             return
         
         # Get tweet URL if not provided
         if not url:
-            url = Prompt.ask("🔗 Enter tweet URL")
+            url = Prompt.ask(f"🔗 {t('enter_tweet_url')}")
         
         if not url:
-            console.print("[red]No tweet URL provided.[/red]")
+            console.print(f"[red]{t('no_url')}[/red]")
             return
+        
+        # Wire report and post options
+        tweetduel._report_format = report_format
+        tweetduel._report_out = report_out
+        tweetduel._offer_post = offer_post
         
         # Run selected mode
         if mode == 'instant':
@@ -463,7 +632,7 @@ def main(url, mode, persona, config):
             tweetduel.run_armory_mode(url)
             
     except KeyboardInterrupt:
-        console.print("\n[yellow]Duel interrupted by user.[/yellow]")
+        console.print(f"\n[yellow]{t('interrupted')}[/yellow]")
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         console.print_exception()

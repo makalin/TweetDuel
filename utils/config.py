@@ -43,7 +43,20 @@ def get_default_config() -> Dict[str, Any]:
             'response_styles': ['contrarian', 'devils_advocate', 'nuanced'],
             'viral_hooks': True
         },
-        'ollama_host': 'http://localhost:11434'
+        'ollama_host': 'http://localhost:11434',
+        'language': 'en',
+        'twitter_bot': {
+            'enabled': False,
+            'bearer_token': None,
+            'api_key': None,
+            'api_secret': None,
+            'access_token': None,
+            'access_token_secret': None,
+        },
+        'reports': {
+            'default_format': 'html',
+            'output_dir': 'reports',
+        },
     }
 
 def save_config(config: Dict[str, Any], config_path: str = None) -> None:
